@@ -1,16 +1,15 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.interpolate import interp1d
 
 
 def importing():
     exp1_data = pd.read_excel(
-        'C:/Users/timof/Desktop/учеба/физон/праки и всякое/элмаг/прак304/304.xlsx', sheet_name='exp1')
+        '304.xlsx', sheet_name='exp1')
     exp2_data = pd.read_excel(
-        'C:/Users/timof/Desktop/учеба/физон/праки и всякое/элмаг/прак304/304.xlsx', sheet_name='exp2')
+        '304.xlsx', sheet_name='exp2')
     exp3_data = pd.read_excel(
-        'C:/Users/timof/Desktop/учеба/физон/праки и всякое/элмаг/прак304/304.xlsx', sheet_name='exp3')
+        '304.xlsx', sheet_name='exp3')
     return exp1_data, exp2_data, exp3_data
 
 
