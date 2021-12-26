@@ -1,15 +1,16 @@
 import numpy as np
 import random as rnd
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 import copy
 import time
 import numba as nb
-import timeit
+from tqdm import tqdm
+import unittest
 
 dt = 100
+sim_lim = 10000  # количество итераций моделирования
+skip_points = 100  # облегчаем постройку графиков
 G = 6.67e-11
-sim_lim = 2000
 error = 1
 test3_extra_bodies = 2
 
@@ -23,9 +24,25 @@ def random_body():
                                 float(rnd.randrange(-1e11, 1e11, 1e8)),
                                 float(rnd.randrange(-1e11, 1e11, 1e8))]))
 
+# -------------Main Classes and Functions------------
+
 
 @nb.njit
 def norm(vec: np.ndarray):
+    """
+    Returns norm of vector
+
+    Parameters
+    ----------
+    vec : np.ndarray
+        vector.
+
+    Returns
+    -------
+    float
+         norm of avector.
+
+    """
     return np.linalg.norm(vec, ord=2)
 
 
@@ -36,6 +53,21 @@ def accelerate(M: float, r: np.ndarray):
 
 class Star:
     def __init__(self, mass: float, radius=0.):
+        """
+        Initialization
+
+        Parameters
+        ----------
+        mass : float
+            Star mass.
+        radius : float, optional
+            Radius of star. The default is 0..
+
+        Returns
+        -------
+        None.
+
+        """
         self.mass = mass
         self.vec_P = [0, 0, 0]
         self.radius = radius
@@ -47,7 +79,7 @@ class Star:
 class CosmicBody:
     def __init__(self, mass: float, vec_v: np.ndarray, vec_P: np.ndarray, r: float = 0.):
         """
-
+        Initialization
 
         Parameters
         ----------
@@ -68,7 +100,7 @@ class CosmicBody:
         self.mass = mass
         self.vec_v = vec_v
         self.vec_P = vec_P
-        self.coords = [[self.vec_P[0]], [self.vec_P[1]], [self.vec_P[2]]]
+        self.coords = np.array([self.vec_P[0], self.vec_P[1], self.vec_P[2]])
         self.radius = r
         self.destroy_flag = False
         self.id = id(self)
@@ -78,7 +110,9 @@ class CosmicBody:
 
     def E_k(self):
         """
-        Returns object's kinetic energy
+        Returns
+        -------
+        Kinetic energy of object, type=float
 
         """
         return self.mass * norm(self.vec_v) ** 2 / 2
@@ -109,6 +143,47 @@ def try_destroy(self_body: CosmicBody, body: [CosmicBody, Star]):
             self_body.destroy_flag = True
 
 
+def gravitate(star: Star, bodies: list):
+    """
+    Doing 1 iterarion of interaction between bodies in system (try_destroy function included)
+    Writing new coordinates of bodies in self.coords
+
+    Parameters
+    ----------
+    star : Star
+        just star.
+    bodies : list
+        list of bodies (planets, comets, etc.).
+
+    Returns
+    -------
+    None.
+
+    """
+    bodies_copy = copy.deepcopy(bodies)
+    for body, body_copy in zip(bodies, bodies_copy):
+        try_destroy(body, star)
+        body_copy.destroy_flag = body.destroy_flag
+        if body.destroy_flag == True:
+            continue
+
+        for dbody in bodies:
+            if dbody.id != body.id:
+                try_destroy(body, dbody)
+                body_copy.destroy_flag = body.destroy_flag
+        for body1 in bodies_copy:
+            if body1.id == body.id or body1.id == True:
+                continue
+            dv = accelerate(body1.mass, body1.vec_P - body_copy.vec_P) * dt
+            body.vec_v += dv
+            body.vec_P += body.vec_v * dt
+        dv = accelerate(star.mass, - body.vec_P) * dt
+        body.vec_v += dv
+        body.vec_P += body.vec_v * dt
+        body.coords = np.column_stack(
+            (body.coords, [body.vec_P[0], body.vec_P[1], body.vec_P[2]]))
+
+
 def E_p(body1, body2):
     """
     returns potential energy of 2 bodies
@@ -118,8 +193,7 @@ def E_p(body1, body2):
 
     Returns
     -------
-    TYPE
-        float
+    TYPE = float
 
     """
     return G * body1.mass * body2.mass / norm(body1.vec_P - body2.vec_P)
@@ -127,7 +201,7 @@ def E_p(body1, body2):
 
 def E_full(star: Star, bodies: np.ndarray):
     """
-    returns full system energy (potential+kinetic)
+    Returns full system energy (potential + kinetic)
 
     Parameters
     ----------
@@ -147,74 +221,6 @@ def E_full(star: Star, bodies: np.ndarray):
         for j in range(i + 1, len(bodies)):
             E += E_p(bodies[i], bodies[j])
     return E
-
-
-def gravitate1(star: Star, bodies: list):  # useless
-    """
-    Gravitation method
-
-    Parameters
-    ----------
-    star : Star
-        DESCRIPTION.
-    bodies : list
-        list of bodies
-
-    Returns
-    -------
-    None.
-
-    """
-    bodies_copy = copy.deepcopy(bodies)
-    for i in range(len(bodies)):
-        try_destroy(bodies[i], star)
-        if bodies[i].destroy_flag == True:
-            bodies_copy[i] = bodies[i]
-        for k in range(len(bodies)):
-            if k != i:
-                continue
-                try_destroy(bodies[i], bodies[k])
-        dv = accelerate(star.mass, star.vec_P - bodies[i].vec_P) * dt
-        if not bodies[i].destroy_flag:
-            bodies[i].vec_v += dv
-            bodies[i].vec_P += bodies[i].vec_v * dt
-        for j in range(len(bodies_copy)):
-            if j != i:
-                dv = accelerate(
-                    bodies_copy[j].mass,  bodies_copy[i].vec_P - bodies_copy[j].vec_P) * dt
-                if not (bodies[i].destroy_flag and bodies_copy[j].destroy_flag):
-                    bodies[i].vec_v += dv
-                    bodies[i].vec_P += bodies[i].vec_v * dt
-        if not bodies[i].destroy_flag:
-            k=1
-            # bodies[i].coords[0].append(bodies[i].vec_P[0])
-            # bodies[i].coords[1].append(bodies[i].vec_P[1])
-            # bodies[i].coords[2].append(bodies[i].vec_P[2])
-
-
-def gravitate(star: Star, bodies: list):
-    bodies_copy = copy.deepcopy(bodies)
-    for body, body_copy in zip(bodies, bodies_copy):
-        try_destroy(body, star)
-        body_copy.destroy_flag = body.destroy_flag
-        if body.destroy_flag == True:
-            continue
-        dv = accelerate(star.mass, - body.vec_P) * dt
-        body.vec_v += dv
-        body.vec_P += body.vec_v * dt
-        for dbody in bodies:
-            if dbody.id != body.id:
-                try_destroy(body, dbody)
-                body_copy.destroy_flag = body.destroy_flag
-        for body1 in bodies_copy:
-            if body1.id == body.id or body1.id == True:
-                continue
-            dv = accelerate(body1.mass, body_copy.vec_P - body1.vec_P)*dt
-            body.vec_v += dv
-            body.vec_P += body.vec_v * dt
-        # body.coords[0].append(body.vec_P[0])
-        # body.coords[1].append(body.vec_P[1])
-        # body.coords[2].append(body.vec_P[2])
 
 
 def orbit_type(star: Star, body: CosmicBody):
@@ -241,6 +247,17 @@ def orbit_type(star: Star, body: CosmicBody):
         return 'Hyperbolic'
     else:
         return 'Parabolic'
+
+
+Earth = CosmicBody(5, np.array([1., 0., 1.]), np.array([1., 1., 1.]))
+system_of_2 = np.array([random_body(), random_body()])
+system_of_2_copy = copy.deepcopy(system_of_2)
+system_of_3 = np.array([random_body(), random_body(), random_body()])
+system_of_4 = np.array([random_body(), random_body(),
+                       random_body(), random_body()])
+Sun = Star(1e31)
+zero = Star(0)
+
 # ----------------------TESTS----------------------
 
 
@@ -262,6 +279,9 @@ def test1(star, bodies: np.ndarray):
         print(f"{i} iterations needed to get {round(error*100,1)}% error")
 
 
+# test1(Sun, system_of_2)
+
+
 def test2(star, bodies: np.ndarray):
     print('\nTest №2:')
     for body in bodies:
@@ -277,13 +297,45 @@ def test2_plot(star, bodies: np.ndarray):
     # ax.set_ylim3d(-1e11, 1e11)
     # ax.set_zlim3d(-1e11, 1e11)
     if star.mass != 0:
-        ax.scatter(0, 0, 0, marker='*', s=200)
+        ax.scatter(0, 0, 0, marker='*', s=100)
     for body in bodies:
-        ax.scatter(body.coords[0][::4], body.coords[1][::4],
-                   body.coords[2][::4], marker='.', s=7)
+        ax.scatter(body.coords[0][::skip_points], body.coords[1][::skip_points],
+                   body.coords[2][::skip_points], marker='.', s=7)
         ax.scatter(body.coords[0][0], body.coords[1]
                    [0], body.coords[2][0], color='red', label='spawn point', s=10)
     ax.set_title('Test №2')
+
+
+# test2(zero, system_of_2)
+# test2_plot(zero, system_of_2)
+
+
+def test2_1(star, bodies: np.ndarray):
+    print('\nTest №2:')
+    for body in bodies:
+        print(body)
+    for i in range(sim_lim):
+        gravitate(star, bodies)
+
+
+def test2_1_plot(star, bodies: np.ndarray):
+    fig = plt.figure(figsize=(5, 5))
+    ax = fig.add_subplot(111, projection='3d')
+    # ax.set_xlim3d(-1e11, 1e11)
+    # ax.set_ylim3d(-1e11, 1e11)
+    # ax.set_zlim3d(-1e11, 1e11)
+    if star.mass != 0:
+        ax.scatter(0, 0, 0, marker='*', s=100)
+    for body in bodies:
+        ax.scatter(body.coords[0][::skip_points], body.coords[1][::skip_points],
+                   body.coords[2][::skip_points], marker='.', s=7)
+        ax.scatter(body.coords[0][0], body.coords[1]
+                   [0], body.coords[2][0], color='red', label='spawn point', s=10)
+    ax.set_title('Test №2')
+
+
+# test2_1(Sun, system_of_2_copy)
+# test2_1_plot(Sun, system_of_2_copy)
 
 
 def test3(star, bodies: np.ndarray):
@@ -310,11 +362,15 @@ def test3_plot(star, bodies: np.ndarray):
     if star.mass != 0:
         ax.scatter(0, 0, 0, marker='*', s=100)
     for body in bodies:
-        ax.scatter(body.coords[0], body.coords[1],
-                   body.coords[2], marker='.', s=7)
+        ax.scatter(body.coords[0][::skip_points], body.coords[1][::skip_points],
+                   body.coords[2][::skip_points], marker='.', s=7)
         ax.scatter(body.coords[0][0], body.coords[1]
                    [0], body.coords[2][0], color='red', label='spawn point', s=10)
     ax.set_title('Test №3')
+
+
+# test3_res = test3(Sun, system_of_3)
+# test3_plot(Sun, test3_res)
 
 
 def test4(star, body):
@@ -327,73 +383,111 @@ def test4(star, body):
     # ax.set_xlim(-20, 20)
     # ax.set_ylim(-20, 20)
     # ax.set_zlim(-20, 20)
-    ax.scatter(star.vec_P[0], star.vec_P[1], star.vec_P[2], marker='*', s=200)
-    ax.scatter(body.coords[0], body.coords[1],
-               body.coords[2], marker='.', s=10)
+    ax.scatter(star.vec_P[0], star.vec_P[1], star.vec_P[2], marker='*', s=130)
+    ax.scatter(body.coords[0][::skip_points], body.coords[1][::skip_points],
+               body.coords[2][::skip_points], marker='.', s=7)
     ax.scatter(body.coords[0][0], body.coords[1]
                [0], body.coords[2][0], color='red', label='spawn point')
     ax.set_title('Test №4')
 
 
-def test6(star, bodies):
+bodddd = random_body()
+# test4(Sun, bodddd)
+
+# %matplotlib notebook
+
+
+def test_animation(star: Star, bodies: np.ndarray):
     fig = plt.figure()
-    ax = fig.add_subplot(projection='3d')
-    # ax.set_xlim3d(-20, 20)
-    # ax.set_ylim3d(-20, 20)
-    # ax.set_zlim3d(-20, 20)
+    ax = fig.add_subplot(111, projection='3d')
 
-    def animate(i):
+    fig.show()
+    fig.canvas.draw()
+
+    for t in tqdm(np.arange(0., sim_lim * dt, dt)):
+        angle = 60 + 60 * t / sim_lim
         gravitate(star, bodies)
-        print(sim_lim - i)
-        ax.cla()
-        ax.scatter(0, 0, 0, marker='*', s=100)
+        ax.clear()
+        #ax.axes.set_xlim3d(-1e12, 1e12)
+        #ax.axes.set_ylim3d(-1e12, 1e12)
+        #ax.axes.set_zlim3d(-1e12, 1e12)
+
+        ax.scatter(0, 0, 0,  s=130)
         for body in bodies:
-            ax.scatter(body.coords[0], body.coords[1], body.coords[2], s=7)
-    ani = FuncAnimation(plt.gcf(), animate, interval=100,
-                        frames=sim_lim, blit=False)
-    ani.save('C:/Users/timof/Desktop/smthm.mp4')
+            ax.scatter(body.coords[0][::int(skip_points/10)], body.coords[1][::int(skip_points/10)],
+                       body.coords[2][::int(skip_points/10)], s=3)
+        # Изменяем угол отображения графика
+        ax.view_init(30 - angle * 0.2, angle)
+        # Перерисовываем фигуру
+        fig.canvas.draw()
 
 
-if __name__ == "__main__":
-    Earth = CosmicBody(5, np.array([1., 0., 1.]), np.array([1., 1., 1.]))
-    system_of_2 = np.array([random_body(), random_body()])
-    system_of_2_copy = copy.deepcopy(system_of_2)
-    system_of_3 = np.array([random_body(), random_body(), random_body()])
-    system_of_4 = np.array(
-        [random_body(), random_body(), random_body(), random_body()])
-    Sun = Star(1e31)
-    zero = Star(0)
+# test_animation(Sun, system_of_4)
 
-    # =========================================================
+class TestStarMethods(unittest.TestCase):
+    def test_init(self):
+        star = Star(1., 1.)
+        self.assertEqual(star.mass, 1.)
+        self.assertEqual(star.radius, 1.)
 
-    start_time = time.time()
-    whole_time = time.time()
 
-    # # Testing law of conservation of energy for system of 2 bodies
-    # test1(Sun, system_of_2)
-    # print("test1 time - %s seconds" % (time.time() - start_time))
+class TestBodyMethods(unittest.TestCase):
+    def test_init(self):
+        body = CosmicBody(1., np.array(
+            [0., 1., 2.]), np.array([0., 1., 2.]), 1.)
+        self.assertEqual(body.mass, 1.)
+        self.assertEqual(body.vec_v.tolist(), [0., 1., 2.])
+        self.assertEqual(body.vec_P.tolist(), [0., 1., 2.])
+        self.assertEqual(body.coords.tolist(), [0., 1., 2.])
+        self.assertEqual(body.radius, 1.)
+        self.assertEqual(body.destroy_flag, False)
 
-    # # Testing our gravitational model on system of 4 bodies
-    test2(Sun, system_of_4)
-    # test2_plot(Sun, system_of_2)
-    # start_time = time.time()
+    def test_E_k(self):
+        body = CosmicBody(1, np.array([0., 3., 4.]), np.arange(3), 1)
+        self.assertAlmostEqual(body.E_k(), 12.5, places=2)
 
-    # # Testing random timings adding system
-    # test3_res = test3(Sun, system_of_3)
-    # test3_plot(Sun, test3_res)
-    # print("test3 time - %s seconds" % (time.time() - start_time))
 
-    # # Testing orbit_type function
-    # test4(Sun, CosmicBody(rnd.randrange(100, 1000, 1)/10,
-    #                       np.array([rnd.randrange(-1000, 1000, 1)/100,
-    #                                 rnd.randrange(-1000, 1000, 1)/100,
-    #                                 rnd.randrange(-1000, 1000, 1)/100]),
-    #                       np.array([rnd.randrange(-1000, 1000, 1)/100,
-    #                                 rnd.randrange(-1000, 1000, 1)/100,
-    #                                 rnd.randrange(-1000, 1000, 1)/100])))
+class TestFunctions(unittest.TestCase):
+    def test_norm(self):
+        self.assertAlmostEqual(norm(np.array([0., 3., 4.])), 5., places=2)
 
-    # start_time = time.time()
-    # Testing 3d animation
-    # test6(Sun, system_of_4)
-    print("test6 time - %s seconds" % (time.time() - start_time))
-    print("tests full time - %s seconds" % (time.time() - whole_time))
+    def test_accelerate(self):
+        self.assertListEqual(accelerate(125e11, np.array(
+            [0., 3., 4.])).tolist(), [0., np.round(6.67 * 3., 2), np.round(6.67 * 4., 2)])
+
+    def test_try_destroy(self):
+        body = CosmicBody(1., np.array(
+            [0., 1., 2.]), np.array([0., 1., 2.]), 1.)
+        body1 = CosmicBody(1., np.array(
+            [0., 1., 2.]), np.array([0., 1., 2.001]), 1.)
+        try_destroy(body, body1)
+        self.assertEqual([body.destroy_flag, body1.destroy_flag], [True, True])
+
+    def test_gravitate(self):
+        star = Star(1e6)
+        body1 = CosmicBody(1e6, np.array(
+            [100., 0., 0.]), np.array([0., 1e3, 0.]))
+        gravitate(star, [body1])
+        vec_P1 = np.array([100 * dt, 1e3 - 6.67e-11 * dt ** 2, 0.])
+        vec_v1 = np.array([100., 6.67e-11 * dt, 0.])
+        for i in range(3):
+            self.assertAlmostEqual(body1.vec_P[i], vec_P1[i], 2)
+            self.assertAlmostEqual(body1.vec_v[i], vec_v1[i], 2)
+
+    def test_E_p(self):
+        body1 = CosmicBody(1e6, np.array(
+            [100., 0., 0.]), np.array([0., 2e3, 0.]))
+        body2 = CosmicBody(1e6, np.array(
+            [100., 0., 0.]), np.array([0., 1e3, 0.]))
+        self.assertAlmostEqual(E_p(body1, body2), 6.67e-2, 2)
+
+    def test_E_full(self):
+        body1 = CosmicBody(1e6, np.array(
+            [100., 0., 0.]), np.array([0., 2e3, 0.]))
+        body2 = CosmicBody(1e6, np.array(
+            [100., 0., 0.]), np.array([0., 1e3, 0.]))
+        self.assertAlmostEqual(
+            E_full(Star(0), [body1, body2]), 1e10 + 6.67e-2, 2)
+    
+
+unittest.main()
