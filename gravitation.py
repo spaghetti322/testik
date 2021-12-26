@@ -2,14 +2,13 @@ import numpy as np
 import random as rnd
 import matplotlib.pyplot as plt
 import copy
-import time
 import numba as nb
 from tqdm import tqdm
 import unittest
 
 dt = 100
 sim_lim = 10000  # количество итераций моделирования
-skip_points = 100  # облегчаем постройку графиков
+skip_points = 10  # облегчаем постройку графиков
 G = 6.67e-11
 error = 1
 test3_extra_bodies = 2
@@ -48,6 +47,22 @@ def norm(vec: np.ndarray):
 
 @nb.njit
 def accelerate(M: float, r: np.ndarray):
+    """
+    Calculating acceleration vector
+
+    Parameters
+    ----------
+    M : float
+        Object mass.
+    r : np.ndarray
+        Accelerated object coordinates.
+
+    Returns
+    -------
+    np.ndarray
+        Acceleration vector.
+
+    """
     return G * M * r / norm(r) ** 3
 
 
@@ -172,7 +187,7 @@ def gravitate(star: Star, bodies: list):
                 try_destroy(body, dbody)
                 body_copy.destroy_flag = body.destroy_flag
         for body1 in bodies_copy:
-            if body1.id == body.id or body1.id == True:
+            if body1.id == body.id or body1.destroy_flag == True:
                 continue
             dv = accelerate(body1.mass, body1.vec_P - body_copy.vec_P) * dt
             body.vec_v += dv
@@ -249,13 +264,12 @@ def orbit_type(star: Star, body: CosmicBody):
         return 'Parabolic'
 
 
-Earth = CosmicBody(5, np.array([1., 0., 1.]), np.array([1., 1., 1.]))
 system_of_2 = np.array([random_body(), random_body()])
 system_of_2_copy = copy.deepcopy(system_of_2)
 system_of_3 = np.array([random_body(), random_body(), random_body()])
 system_of_4 = np.array([random_body(), random_body(),
                        random_body(), random_body()])
-Sun = Star(1e31)
+Sun = Star(2e30)
 zero = Star(0)
 
 # ----------------------TESTS----------------------
@@ -372,27 +386,30 @@ def test3_plot(star, bodies: np.ndarray):
 # test3_res = test3(Sun, system_of_3)
 # test3_plot(Sun, test3_res)
 
+a = 149.6e9
+e = 0.0167
+V_y = 29406.
+Earth = CosmicBody(5.972e24, np.array([0, V_y, 0]), np.array([152.1e9, 0, 0]))
 
-def test4(star, body):
-    print('\nTest №4: testing orbyt_type function')
-    print(orbit_type(star, body))
-    for i in range(sim_lim):
-        gravitate(star, np.array([body]))
+
+def test4(Sun, Earth):
+    for t in tqdm(np.arange(0., 365 * 24 * 60 * 30, dt)):
+        gravitate(Sun, [Earth])
+    print('Perihelium coordinates of Earth in our model:',Earth.vec_P)
+    print('Perihelium coordinates of Earth in reality: 147.1e11')
+    for t in tqdm(np.arange(0., 365 * 24 * 60 * 30, dt)):
+        gravitate(Sun, [Earth])
     fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    # ax.set_xlim(-20, 20)
-    # ax.set_ylim(-20, 20)
-    # ax.set_zlim(-20, 20)
-    ax.scatter(star.vec_P[0], star.vec_P[1], star.vec_P[2], marker='*', s=130)
-    ax.scatter(body.coords[0][::skip_points], body.coords[1][::skip_points],
-               body.coords[2][::skip_points], marker='.', s=7)
-    ax.scatter(body.coords[0][0], body.coords[1]
-               [0], body.coords[2][0], color='red', label='spawn point')
-    ax.set_title('Test №4')
+    ax = fig.add_subplot(111)
+    ax.scatter(Sun.vec_P[0], Sun.vec_P[1], marker='*', s=130)
+    ax.scatter(Earth.coords[0][::skip_points],
+               Earth.coords[1][::skip_points], marker='.', s=7)
+    ax.scatter(Earth.coords[0][0], Earth.coords[1]
+               [0], color='red', label='spawn point')
 
 
-bodddd = random_body()
-# test4(Sun, bodddd)
+test4(Sun, Earth)
+
 
 # %matplotlib notebook
 
@@ -423,6 +440,7 @@ def test_animation(star: Star, bodies: np.ndarray):
 
 
 # test_animation(Sun, system_of_4)
+
 
 class TestStarMethods(unittest.TestCase):
     def test_init(self):
@@ -488,6 +506,6 @@ class TestFunctions(unittest.TestCase):
             [100., 0., 0.]), np.array([0., 1e3, 0.]))
         self.assertAlmostEqual(
             E_full(Star(0), [body1, body2]), 1e10 + 6.67e-2, 2)
-    
+
 
 unittest.main()
